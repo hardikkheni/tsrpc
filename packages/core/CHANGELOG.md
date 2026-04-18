@@ -1,5 +1,11 @@
 # @jsontpc/core
 
+## 0.1.2
+
+### Patch Changes
+
+- f1dfb6d: formatting
+
 ## 0.1.1
 
 ### Patch Changes

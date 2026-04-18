@@ -1,6 +1,6 @@
 {
   "name": "@jsontpc/tcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "TCP transport for @jsontpc/core — NDJSON framing over Node.js net sockets",
   "type": "module",
   "engines": {

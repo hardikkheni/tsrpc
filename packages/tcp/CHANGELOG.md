@@ -1,5 +1,13 @@
 # @jsontpc/tcp
 
+## 0.1.1
+
+### Patch Changes
+
+- f1dfb6d: formatting
+- Updated dependencies [f1dfb6d]
+  - @jsontpc/core@0.1.2
+
 ## 0.1.0
 
 ### Minor Changes
