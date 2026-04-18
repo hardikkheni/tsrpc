@@ -1,5 +1,13 @@
 # @jsontpc/fastify
 
+## 0.0.3
+
+### Patch Changes
+
+- f1dfb6d: formatting
+- Updated dependencies [f1dfb6d]
+  - @jsontpc/core@0.1.2
+
 ## 0.0.2
 
 ### Patch Changes
