@@ -1,4 +1,4 @@
-import { Transform } from "node:stream";
+import { Transform } from 'node:stream';
 
 /**
  * Pluggable framing strategy for TCP byte-stream transport.
@@ -24,22 +24,22 @@ export interface IFramer {
  */
 export class NdJsonFramer implements IFramer {
   encode(message: string): Buffer {
-    return Buffer.from(`${message}\n`, "utf8");
+    return Buffer.from(`${message}\n`, 'utf8');
   }
 
   createDecoder(): Transform {
-    let buffer = "";
+    let buffer = '';
 
     return new Transform({
       readableObjectMode: true,
 
       transform(chunk: Buffer | string, _encoding, callback) {
-        buffer += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+        buffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
 
-        const lines = buffer.split("\n");
+        const lines = buffer.split('\n');
         // The last element is either empty (trailing newline consumed) or an
         // incomplete line — keep it in the buffer.
-        buffer = lines.pop() ?? "";
+        buffer = lines.pop() ?? '';
 
         for (const line of lines) {
           const trimmed = line.trim();
@@ -57,7 +57,7 @@ export class NdJsonFramer implements IFramer {
         if (trimmed.length > 0) {
           this.push(trimmed);
         }
-        buffer = "";
+        buffer = '';
         callback();
       },
     });

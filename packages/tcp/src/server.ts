@@ -1,8 +1,8 @@
-import * as net from "node:net";
-import { createRequestHandler } from "@jsontpc/core";
-import type { IServerTransport, JsonRpcServer } from "@jsontpc/core";
-import { NdJsonFramer } from "./framing";
-import type { IFramer } from "./framing";
+import * as net from 'node:net';
+import { createRequestHandler } from '@jsontpc/core';
+import type { IServerTransport, JsonRpcServer } from '@jsontpc/core';
+import { NdJsonFramer } from './framing';
+import type { IFramer } from './framing';
 
 const DEFAULT_MAX_MESSAGE_SIZE = 1_048_576; // 1 MiB
 
@@ -40,9 +40,9 @@ export class TcpServerTransport implements IServerTransport {
   /** Starts listening on the given port. Returns a Promise for async/await convenience. */
   listen(port: number): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.netServer.once("error", reject);
+      this.netServer.once('error', reject);
       this.netServer.listen(port, () => {
-        this.netServer.removeListener("error", reject);
+        this.netServer.removeListener('error', reject);
         resolve();
       });
     });
@@ -59,7 +59,7 @@ export class TcpServerTransport implements IServerTransport {
 
   private handleSocket(socket: net.Socket): void {
     if (!this.server) {
-      socket.destroy(new Error("No server attached — call attach() before listen()"));
+      socket.destroy(new Error('No server attached — call attach() before listen()'));
       return;
     }
 
@@ -67,16 +67,16 @@ export class TcpServerTransport implements IServerTransport {
     const decoder = this.framer.createDecoder();
     let pendingBytes = 0;
 
-    socket.on("data", (chunk: Buffer) => {
+    socket.on('data', (chunk: Buffer) => {
       pendingBytes += chunk.length;
       if (pendingBytes > this.maxMessageSize) {
-        socket.destroy(new Error("Message size limit exceeded"));
+        socket.destroy(new Error('Message size limit exceeded'));
         return;
       }
       decoder.write(chunk);
     });
 
-    decoder.on("data", (message: string) => {
+    decoder.on('data', (message: string) => {
       // Reset byte counter once a complete message is decoded.
       pendingBytes = 0;
 
@@ -87,11 +87,11 @@ export class TcpServerTransport implements IServerTransport {
       });
     });
 
-    socket.on("error", () => {
+    socket.on('error', () => {
       decoder.destroy();
     });
 
-    socket.on("close", () => {
+    socket.on('close', () => {
       decoder.destroy();
     });
   }

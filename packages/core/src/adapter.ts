@@ -1,7 +1,7 @@
-import { ErrorCode, JsonRpcError } from "./errors";
-import { isBatch, parseMessage, serializeResponse } from "./protocol";
-import type { JsonRpcServer } from "./server";
-import type { AnyResponse } from "./types";
+import { ErrorCode, JsonRpcError } from './errors';
+import { isBatch, parseMessage, serializeResponse } from './protocol';
+import type { JsonRpcServer } from './server';
+import type { AnyResponse } from './types';
 
 // ---------------------------------------------------------------------------
 // IFrameworkAdapter — OOP interface
@@ -57,9 +57,9 @@ export function createRequestHandler(
     } catch (err) {
       // parseMessage throws JsonRpcError — serialize as an error response
       const rpcErr =
-        err instanceof JsonRpcError ? err : new JsonRpcError("Parse error", ErrorCode.PARSE_ERROR);
+        err instanceof JsonRpcError ? err : new JsonRpcError('Parse error', ErrorCode.PARSE_ERROR);
       const errResponse: AnyResponse = {
-        jsonrpc: "2.0",
+        jsonrpc: '2.0',
         error: { code: rpcErr.code, message: rpcErr.message, data: rpcErr.data },
         id: null,
       };

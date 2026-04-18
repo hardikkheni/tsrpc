@@ -1,6 +1,6 @@
-import { ErrorCode, JsonRpcError } from "./errors";
-import { detectVersion, isNotification, serializeResponse } from "./protocol";
-import type { Router } from "./router";
+import { ErrorCode, JsonRpcError } from './errors';
+import { detectVersion, isNotification, serializeResponse } from './protocol';
+import type { Router } from './router';
 import type {
   AnyBatch,
   AnyRequest,
@@ -10,7 +10,7 @@ import type {
   JsonRpcResponse1,
   JsonRpcResponse2Err,
   JsonRpcResponse2Ok,
-} from "./types";
+} from './types';
 
 // ---------------------------------------------------------------------------
 // Transport interface (implemented by each @jsontpc/* transport package)
@@ -29,34 +29,34 @@ export interface IServerTransport {
 
 function isZodError(err: unknown): err is { issues: unknown[] } {
   return (
-    typeof err === "object" && err !== null && Array.isArray((err as { issues?: unknown }).issues)
+    typeof err === 'object' && err !== null && Array.isArray((err as { issues?: unknown }).issues)
   );
 }
 
 function toRpcError(err: unknown): JsonRpcError {
   if (err instanceof JsonRpcError) return err;
-  const message = err instanceof Error ? err.message : "An internal error occurred";
-  const data = process.env.NODE_ENV !== "production" ? { cause: message } : undefined;
-  return new JsonRpcError("Internal error", ErrorCode.INTERNAL_ERROR, data);
+  const message = err instanceof Error ? err.message : 'An internal error occurred';
+  const data = process.env.NODE_ENV !== 'production' ? { cause: message } : undefined;
+  return new JsonRpcError('Internal error', ErrorCode.INTERNAL_ERROR, data);
 }
 
 function buildResponse(
   version: 1 | 2,
-  id: AnyRequest["id"],
+  id: AnyRequest['id'],
   result: unknown,
   error: JsonRpcErrorObject | null,
 ): AnyResponse {
   if (version === 2) {
-    const id2 = (id ?? null) as JsonRpcResponse2Ok["id"];
+    const id2 = (id ?? null) as JsonRpcResponse2Ok['id'];
     if (error !== null) {
       return {
-        jsonrpc: "2.0",
+        jsonrpc: '2.0',
         error,
         id: id2,
       } satisfies JsonRpcResponse2Err;
     }
     return {
-      jsonrpc: "2.0",
+      jsonrpc: '2.0',
       result,
       id: id2,
     } satisfies JsonRpcResponse2Ok;
@@ -143,16 +143,16 @@ export class JsonRpcServer<TRouter extends Router = Router> {
         input = procedure.inputSchema.parse(rawParams);
       } catch (err) {
         if (isZodError(err)) {
-          throw new JsonRpcError("Invalid params", ErrorCode.INVALID_PARAMS, err.issues);
+          throw new JsonRpcError('Invalid params', ErrorCode.INVALID_PARAMS, err.issues);
         }
-        throw new JsonRpcError("Invalid params", ErrorCode.INVALID_PARAMS);
+        throw new JsonRpcError('Invalid params', ErrorCode.INVALID_PARAMS);
       }
     }
 
     const result = await procedure.handler({ input, context });
 
     // Output validation is a developer-experience aid — dev mode only, never throws
-    if (procedure.outputSchema && process.env.NODE_ENV !== "production") {
+    if (procedure.outputSchema && process.env.NODE_ENV !== 'production') {
       try {
         procedure.outputSchema.parse(result);
       } catch (err) {

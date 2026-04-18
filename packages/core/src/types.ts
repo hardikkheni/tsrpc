@@ -34,7 +34,7 @@ export interface JsonRpcResponse1 {
 // ---------------------------------------------------------------------------
 
 export interface JsonRpcRequest2 {
-  jsonrpc: "2.0";
+  jsonrpc: '2.0';
   method: string;
   params?: JsonRpcParams;
   /** Absent (undefined) for notifications */
@@ -42,13 +42,13 @@ export interface JsonRpcRequest2 {
 }
 
 export interface JsonRpcResponse2Ok {
-  jsonrpc: "2.0";
+  jsonrpc: '2.0';
   result: unknown;
   id: JsonRpcId;
 }
 
 export interface JsonRpcResponse2Err {
-  jsonrpc: "2.0";
+  jsonrpc: '2.0';
   error: JsonRpcErrorObject;
   id: JsonRpcId;
 }
