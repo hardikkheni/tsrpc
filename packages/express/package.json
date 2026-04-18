@@ -32,6 +32,11 @@
   "peerDependencies": {
     "express": ">=4"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hardikkheni/jsontpc.git",
+    "directory": "packages/express"
+  },
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org"

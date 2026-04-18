@@ -32,6 +32,11 @@
   "peerDependenciesMeta": {
     "zod": { "optional": true }
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hardikkheni/jsontpc.git",
+    "directory": "packages/core"
+  },
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org"
