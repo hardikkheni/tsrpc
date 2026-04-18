@@ -1,7 +1,7 @@
-import * as net from "node:net";
-import type { IClientTransport, JsonRpcId } from "@jsontpc/core";
-import { NdJsonFramer } from "./framing";
-import type { IFramer } from "./framing";
+import * as net from 'node:net';
+import type { IClientTransport, JsonRpcId } from '@jsontpc/core';
+import { NdJsonFramer } from './framing';
+import type { IFramer } from './framing';
 
 const DEFAULT_MAX_MESSAGE_SIZE = 1_048_576; // 1 MiB
 
@@ -36,7 +36,7 @@ export class TcpClientTransport implements IClientTransport {
   private pendingBytes = 0;
 
   constructor(options: TcpClientTransportOptions) {
-    this.host = options.host ?? "127.0.0.1";
+    this.host = options.host ?? '127.0.0.1';
     this.port = options.port;
     this.framer = options.framer ?? new NdJsonFramer();
     this.maxMessageSize = options.maxMessageSize ?? DEFAULT_MAX_MESSAGE_SIZE;
@@ -49,16 +49,16 @@ export class TcpClientTransport implements IClientTransport {
       this.socket = socket;
       this.pendingBytes = 0;
 
-      socket.on("data", (chunk: Buffer) => {
+      socket.on('data', (chunk: Buffer) => {
         this.pendingBytes += chunk.length;
         if (this.pendingBytes > this.maxMessageSize) {
-          socket.destroy(new Error("Incoming message size limit exceeded"));
+          socket.destroy(new Error('Incoming message size limit exceeded'));
           return;
         }
         decoder.write(chunk);
       });
 
-      decoder.on("data", (message: string) => {
+      decoder.on('data', (message: string) => {
         this.pendingBytes = 0;
         this.dispatchMessage(message);
       });
@@ -67,17 +67,17 @@ export class TcpClientTransport implements IClientTransport {
         this.rejectAll(err);
       };
 
-      socket.on("error", onError);
+      socket.on('error', onError);
 
-      socket.on("close", () => {
-        const err = new Error("TCP connection closed");
+      socket.on('close', () => {
+        const err = new Error('TCP connection closed');
         this.rejectAll(err);
         decoder.destroy();
       });
 
       socket.connect(this.port, this.host, () => {
-        socket.removeListener("error", onError);
-        socket.on("error", (err) => {
+        socket.removeListener('error', onError);
+        socket.on('error', (err) => {
           this.rejectAll(err);
         });
         resolve();
@@ -87,7 +87,7 @@ export class TcpClientTransport implements IClientTransport {
 
   send(message: string): Promise<string> {
     if (!this.socket || this.socket.destroyed) {
-      return Promise.reject(new Error("Not connected — call connect() first"));
+      return Promise.reject(new Error('Not connected — call connect() first'));
     }
 
     // Detect notifications: parse the id from the message without a full
@@ -96,7 +96,7 @@ export class TcpClientTransport implements IClientTransport {
     try {
       const parsed = JSON.parse(message) as Record<string, unknown>;
       // JSON-RPC 2.0: id is absent on notifications; 1.0: id is null.
-      id = "id" in parsed ? (parsed.id as JsonRpcId) : undefined;
+      id = 'id' in parsed ? (parsed.id as JsonRpcId) : undefined;
     } catch {
       // Malformed — still send; the server will return a parse error.
     }
@@ -105,7 +105,7 @@ export class TcpClientTransport implements IClientTransport {
 
     // Notifications (id absent or null) are fire-and-forget.
     if (id === undefined || id === null) {
-      return Promise.resolve("");
+      return Promise.resolve('');
     }
 
     return new Promise<string>((resolve, reject) => {
@@ -136,8 +136,8 @@ export class TcpClientTransport implements IClientTransport {
     try {
       const parsed = JSON.parse(message) as Record<string, unknown>;
       // Batch responses are arrays — no top-level id.
-      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-        id = "id" in parsed ? (parsed.id as JsonRpcId) : undefined;
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        id = 'id' in parsed ? (parsed.id as JsonRpcId) : undefined;
       }
     } catch {
       // Unparseable — fall through to message listeners.

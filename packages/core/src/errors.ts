@@ -1,6 +1,5 @@
 // Standard JSON-RPC error codes and the JsonRpcError class.
 
-// eslint-disable-next-line no-shadow
 export enum ErrorCode {
   PARSE_ERROR = -32700,
   INVALID_REQUEST = -32600,
@@ -10,7 +9,7 @@ export enum ErrorCode {
 }
 
 export class JsonRpcError extends Error {
-  override readonly name = "JsonRpcError";
+  override readonly name = 'JsonRpcError';
 
   constructor(
     message: string,

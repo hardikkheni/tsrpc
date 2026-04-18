@@ -1,6 +1,6 @@
-import { JsonRpcError } from "./errors";
-import type { InferRouterInput, InferRouterOutput, Router } from "./router";
-import type { JsonRpcRequest2, JsonRpcResponse2Err, JsonRpcResponse2Ok } from "./types";
+import { JsonRpcError } from './errors';
+import type { InferRouterInput, InferRouterOutput, Router } from './router';
+import type { JsonRpcRequest2, JsonRpcResponse2Err, JsonRpcResponse2Ok } from './types';
 
 // ---------------------------------------------------------------------------
 // Transport interface (implemented by each @jsontpc/* transport package)
@@ -36,22 +36,22 @@ export function createClient<TRouter extends Router>(
 
   return new Proxy({} as ClientProxy<TRouter>, {
     get(_target, prop: string | symbol) {
-      if (typeof prop !== "string") return undefined;
+      if (typeof prop !== 'string') return undefined;
 
       return async (params: unknown): Promise<unknown> => {
         const id = ++idCounter;
 
         const request: JsonRpcRequest2 = {
-          jsonrpc: "2.0",
+          jsonrpc: '2.0',
           method: prop,
-          params: params as JsonRpcRequest2["params"],
+          params: params as JsonRpcRequest2['params'],
           id,
         };
 
         const rawResponse = await transport.send(JSON.stringify(request));
         const response = JSON.parse(rawResponse) as JsonRpcResponse2Ok | JsonRpcResponse2Err;
 
-        if ("error" in response && response.error != null) {
+        if ('error' in response && response.error != null) {
           throw new JsonRpcError(response.error.message, response.error.code, response.error.data);
         }
 

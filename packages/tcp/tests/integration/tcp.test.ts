@@ -1,10 +1,10 @@
-import * as net from "node:net";
-import { Transform } from "node:stream";
-import { JsonRpcServer, createClient, createRouter, procedure } from "@jsontpc/core";
-import type { AnyBatch, AnyResponse, JsonRpcResponse2Err, JsonRpcResponse2Ok } from "@jsontpc/core";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { NdJsonFramer, TcpClientTransport, TcpServerTransport } from "../../src/index";
-import type { IFramer } from "../../src/index";
+import * as net from 'node:net';
+import { Transform } from 'node:stream';
+import { JsonRpcServer, createClient, createRouter, procedure } from '@jsontpc/core';
+import type { AnyBatch, AnyResponse, JsonRpcResponse2Err, JsonRpcResponse2Ok } from '@jsontpc/core';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { NdJsonFramer, TcpClientTransport, TcpServerTransport } from '../../src/index';
+import type { IFramer } from '../../src/index';
 
 // ---------------------------------------------------------------------------
 // Shared router & server
@@ -33,7 +33,7 @@ const router = createRouter({
 // Main suite — default NdJsonFramer
 // ---------------------------------------------------------------------------
 
-describe("TcpServerTransport + TcpClientTransport (NDJSON)", () => {
+describe('TcpServerTransport + TcpClientTransport (NDJSON)', () => {
   const PORT = 3201;
   let serverTransport: TcpServerTransport;
   let clientTransport: TcpClientTransport;
@@ -59,22 +59,22 @@ describe("TcpServerTransport + TcpClientTransport (NDJSON)", () => {
   // 1. JSON-RPC 2.0 basic calls via typed proxy
   // -------------------------------------------------------------------------
 
-  it("add — typed proxy call", async () => {
+  it('add — typed proxy call', async () => {
     const result = await typedClient.add({ a: 10, b: 32 });
     expect(result).toBe(42);
   });
 
-  it("greet — typed proxy call", async () => {
-    const result = await typedClient.greet({ name: "World" });
-    expect(result).toBe("Hello, World!");
+  it('greet — typed proxy call', async () => {
+    const result = await typedClient.greet({ name: 'World' });
+    expect(result).toBe('Hello, World!');
   });
 
   // -------------------------------------------------------------------------
   // 2. JSON-RPC 1.0 shape (raw send)
   // -------------------------------------------------------------------------
 
-  it("JSON-RPC 1.0 call — response has result/error fields (no jsonrpc)", async () => {
-    const raw = JSON.stringify({ method: "add", params: { a: 5, b: 3 }, id: 99 });
+  it('JSON-RPC 1.0 call — response has result/error fields (no jsonrpc)', async () => {
+    const raw = JSON.stringify({ method: 'add', params: { a: 5, b: 3 }, id: 99 });
     const responseRaw = await clientTransport.send(raw);
     const response = JSON.parse(responseRaw) as {
       result: unknown;
@@ -92,10 +92,10 @@ describe("TcpServerTransport + TcpClientTransport (NDJSON)", () => {
   // 3. Batch request (raw send)
   // -------------------------------------------------------------------------
 
-  it("batch request — all results returned", async () => {
+  it('batch request — all results returned', async () => {
     const batch: AnyBatch = [
-      { jsonrpc: "2.0", method: "add", params: { a: 1, b: 2 }, id: 10 },
-      { jsonrpc: "2.0", method: "add", params: { a: 3, b: 4 }, id: 11 },
+      { jsonrpc: '2.0', method: 'add', params: { a: 1, b: 2 }, id: 10 },
+      { jsonrpc: '2.0', method: 'add', params: { a: 3, b: 4 }, id: 11 },
     ];
 
     // Batch responses arrive as a single JSON array message.
@@ -105,7 +105,7 @@ describe("TcpServerTransport + TcpClientTransport (NDJSON)", () => {
 
     // Write the batch directly to the socket (bypassing `send` which tracks ids).
     // Cast needed to reach the private field from an integration test.
-    (clientTransport as unknown as { socket: import("node:net").Socket }).socket.write(
+    (clientTransport as unknown as { socket: import('node:net').Socket }).socket.write(
       new NdJsonFramer().encode(JSON.stringify(batch)),
     );
 
@@ -124,21 +124,21 @@ describe("TcpServerTransport + TcpClientTransport (NDJSON)", () => {
   // 4. Notification — fire-and-forget, no response
   // -------------------------------------------------------------------------
 
-  it("notification — server handler runs, send resolves empty string", async () => {
+  it('notification — server handler runs, send resolves empty string', async () => {
     events.length = 0;
-    const notif = JSON.stringify({ jsonrpc: "2.0", method: "logEvent", params: { name: "ping" } });
+    const notif = JSON.stringify({ jsonrpc: '2.0', method: 'logEvent', params: { name: 'ping' } });
     const result = await clientTransport.send(notif);
-    expect(result).toBe("");
+    expect(result).toBe('');
     // Give the async fire-and-forget handler time to run.
     await new Promise((r) => setTimeout(r, 50));
-    expect(events).toContain("ping");
+    expect(events).toContain('ping');
   });
 
   // -------------------------------------------------------------------------
   // 5. Method not found → error code -32601
   // -------------------------------------------------------------------------
 
-  it("method not found — returns error code -32601", async () => {
+  it('method not found — returns error code -32601', async () => {
     expect.assertions(2);
     try {
       await (
@@ -155,7 +155,7 @@ describe("TcpServerTransport + TcpClientTransport (NDJSON)", () => {
   // 6. Multiple concurrent requests resolve independently
   // -------------------------------------------------------------------------
 
-  it("concurrent requests — all resolve with correct results", async () => {
+  it('concurrent requests — all resolve with correct results', async () => {
     const [r1, r2, r3] = await Promise.all([
       typedClient.add({ a: 1, b: 1 }),
       typedClient.add({ a: 2, b: 2 }),
@@ -177,7 +177,7 @@ describe("TcpServerTransport + TcpClientTransport (NDJSON)", () => {
  */
 class LengthPrefixFramer implements IFramer {
   encode(message: string): Buffer {
-    const payload = Buffer.from(message, "utf8");
+    const payload = Buffer.from(message, 'utf8');
     const header = Buffer.allocUnsafe(4);
     header.writeUInt32BE(payload.length, 0);
     return Buffer.concat([header, payload]);
@@ -195,7 +195,7 @@ class LengthPrefixFramer implements IFramer {
         while (buf.length >= 4) {
           const msgLen = buf.readUInt32BE(0);
           if (buf.length < 4 + msgLen) break;
-          const msg = buf.subarray(4, 4 + msgLen).toString("utf8");
+          const msg = buf.subarray(4, 4 + msgLen).toString('utf8');
           buf = buf.subarray(4 + msgLen);
           this.push(msg);
         }
@@ -205,7 +205,7 @@ class LengthPrefixFramer implements IFramer {
   }
 }
 
-describe("TcpServerTransport + TcpClientTransport (custom LengthPrefixFramer)", () => {
+describe('TcpServerTransport + TcpClientTransport (custom LengthPrefixFramer)', () => {
   const PORT = 3202;
   const framer = new LengthPrefixFramer();
   let serverTransport: TcpServerTransport;
@@ -228,7 +228,7 @@ describe("TcpServerTransport + TcpClientTransport (custom LengthPrefixFramer)", 
     await serverTransport.close();
   });
 
-  it("add — works with custom length-prefix framer", async () => {
+  it('add — works with custom length-prefix framer', async () => {
     const result = await typedClient.add({ a: 7, b: 8 });
     expect(result).toBe(15);
   });
@@ -238,7 +238,7 @@ describe("TcpServerTransport + TcpClientTransport (custom LengthPrefixFramer)", 
 // maxMessageSize suite
 // ---------------------------------------------------------------------------
 
-describe("maxMessageSize — oversized message destroys socket", () => {
+describe('maxMessageSize — oversized message destroys socket', () => {
   const PORT = 3203;
   let serverTransport: TcpServerTransport;
 
@@ -252,31 +252,31 @@ describe("maxMessageSize — oversized message destroys socket", () => {
     await serverTransport.close();
   });
 
-  it("socket is destroyed when message exceeds maxMessageSize", async () => {
+  it('socket is destroyed when message exceeds maxMessageSize', async () => {
     expect.assertions(1);
 
     await new Promise<void>((resolve, reject) => {
       const socket = net.createConnection({ port: PORT }, () => {
         // Send a message larger than 64 bytes.
         const oversized = JSON.stringify({
-          jsonrpc: "2.0",
-          method: "add",
-          params: { a: 1, b: 2, padding: "x".repeat(200) },
+          jsonrpc: '2.0',
+          method: 'add',
+          params: { a: 1, b: 2, padding: 'x'.repeat(200) },
           id: 1,
         });
         socket.write(new NdJsonFramer().encode(oversized));
       });
 
-      socket.on("close", () => {
+      socket.on('close', () => {
         expect(true).toBe(true); // socket was closed/destroyed by server
         resolve();
       });
 
-      socket.on("error", () => {
+      socket.on('error', () => {
         // error before close is also acceptable
       });
 
-      setTimeout(() => reject(new Error("timeout waiting for socket close")), 3000);
+      setTimeout(() => reject(new Error('timeout waiting for socket close')), 3000);
     });
   });
 });
