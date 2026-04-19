@@ -772,6 +772,57 @@ v0.2 adds first-class support for server-to-client push notifications. The desig
 - **`IPubSubTransport`** and **`IEventBus`** interfaces live in `@jsontpc/core` (keeps the core lean; other packages type-check against them without new deps)
 - Concrete implementations (`PubSubServer`, `SubscriptionRegistry`, `PollingAdapter`, `EventBus`) live in the new **`@jsontpc/pubsub`** package
 - Transports that support persistent connections (`@jsontpc/tcp`, `@jsontpc/ws`) implement `IPubSubTransport`; HTTP transports fall back to polling
+- Topic→payload mappings are **fully type-safe**: declare a `TTopics` interface once; every `publish`, `broadcast`, `$subscribe`, and `rpc.poll` payload is inferred from it at compile time
+
+### 13.0 Typed Topics
+
+All pub/sub APIs accept an optional `TTopics extends PubSubTopics` generic parameter
+(where `PubSubTopics = Record<string, unknown>`). Declare an interface that maps topic names to
+their payload shapes, then thread it through both the server and client:
+
+```ts
+import type { PubSubTopics } from '@jsontpc/core';
+
+interface AppTopics extends PubSubTopics {
+  'prices.updated': { symbol: string; price: number };
+  'order.placed':   { orderId: string; amount: number };
+  'system.ping':    Record<string, never>;
+}
+```
+
+Pass `AppTopics` as the third generic to `PubSubServer` and the second to `createPubSubClient`:
+
+```ts
+// Server — publish() and broadcast() are type-checked against AppTopics
+const pubsub = new PubSubServer<typeof router, MyContext, AppTopics>(server, transport);
+
+await pubsub.publish('prices.updated', { symbol: 'BTC', price: 65000 }); // ✓
+await pubsub.publish('prices.updated', { symbol: 'BTC', price: '65k' }); // ✗ type error
+
+// Client — $subscribe callback parameter is typed from AppTopics
+const client = createPubSubClient<typeof router, AppTopics>(transport);
+await client.$subscribe('prices.updated', ({ symbol, price }) => {
+  //                                         ^^^^^^  ^^^^^  both typed
+  console.log(symbol, price);
+});
+```
+
+When `TTopics` is omitted it defaults to `Record<string, unknown>` — existing untyped code keeps compiling, with `unknown` payloads.
+
+Two utility types are exported from `@jsontpc/core`:
+
+```ts
+// Constraint alias — use as the extends clause in your own generic parameters
+export type PubSubTopics = Record<string, unknown>;
+
+// Extract the payload type for a specific topic key
+export type InferTopicPayload<
+  TTopics extends PubSubTopics,
+  K extends keyof TTopics & string,
+> = TTopics[K];
+```
+
+`InferTopicPayload` follows the same ergonomic pattern as `InferProcedureInput` / `InferProcedureOutput` from the router layer.
 
 ### 13.1 `IPubSubTransport` Interface
 
@@ -790,63 +841,112 @@ interface IPubSubTransport extends IServerTransport {
 
 ### 13.2 `PubSubServer`
 
-`PubSubServer<TRouter, TContext>` wraps an existing `JsonRpcServer` and an `IPubSubTransport` (or any `IServerTransport` for the polling path):
+`PubSubServer<TRouter, TContext = unknown, TTopics extends PubSubTopics = PubSubTopics>` wraps an
+existing `JsonRpcServer` and an `IPubSubTransport` (or any `IServerTransport` for the polling path):
 
 ```ts
 import { PubSubServer } from '@jsontpc/pubsub';
+import type { AppTopics } from './topics.js';
 
-const pubsub = new PubSubServer(server, transport);
+const pubsub = new PubSubServer<typeof router, MyContext, AppTopics>(server, transport);
 await pubsub.listen(4000);
 
-// Publish to all subscribers of a topic
+// Publish to all subscribers of a topic — payload type is inferred from AppTopics
 await pubsub.publish('prices.updated', { symbol: 'BTC', price: 65000 });
 
 // Broadcast a notification to every connected client
-await pubsub.broadcast('system.maintenance', { message: 'Back in 5 min' });
+await pubsub.broadcast('system.ping', {});
+```
+
+The `publish` and `broadcast` method signatures:
+
+```ts
+publish<K extends keyof TTopics & string>(
+  topic: K,
+  data: TTopics[K],
+): Promise<void>;
+
+broadcast<K extends keyof TTopics & string>(
+  topic: K,
+  data: TTopics[K],
+): Promise<void>;
 ```
 
 `PubSubServer` automatically registers two built-in procedures on the underlying `JsonRpcServer`:
 
 | Method | Params | Description |
 |--------|--------|-------------|
-| `rpc.subscribe` | `{ topic: string }` | Subscribe the connection to a topic |
-| `rpc.unsubscribe` | `{ topic: string }` | Unsubscribe from a topic |
+| `rpc.subscribe` | `{ topic: keyof TTopics & string }` | Subscribe the connection to a topic |
+| `rpc.unsubscribe` | `{ topic: keyof TTopics & string }` | Unsubscribe from a topic |
 
 ### 13.3 Polling Fallback
 
 When the transport does not implement `IPubSubTransport`, `PubSubServer` activates the built-in `PollingAdapter`:
 
-- Each connection (identified by a request-scoped token) gets a ring buffer of pending notifications
+- Each connection (identified by a request-scoped token) gets a ring buffer of pending notifications typed as `TopicNotification<TTopics>`
 - A third built-in procedure `rpc.poll` is registered; the client calls it periodically
-- `rpc.poll` returns `{ notifications: Array<{ topic: string; params: unknown }> }` and clears the buffer
+- `rpc.poll` returns `{ notifications: Array<TopicNotification<TTopics>> }` — a discriminated union keyed on `topic` — and clears the buffer
 - Buffer is configurable: `maxBuffer` (default 100 items) and `ttlMs` (default 60 000 ms)
+
+`TopicNotification<TTopics>` is a mapped discriminated union exported from `@jsontpc/core`:
+
+```ts
+// Exported from @jsontpc/core
+export type TopicNotification<TTopics extends PubSubTopics> = {
+  [K in keyof TTopics & string]: { topic: K; params: TTopics[K] };
+}[keyof TTopics & string];
+```
+
+Narrowing on `notification.topic` automatically narrows `notification.params` to the correct payload type — no casts needed:
+
+```ts
+for (const n of result.notifications) {
+  if (n.topic === 'prices.updated') {
+    console.log(n.params.price); // typed as number
+  }
+}
+```
 
 ### 13.4 PubSub Client
 
-`createPubSubClient<TRouter>(transport)` wraps `createClient<TRouter>` and adds subscription helpers:
+`createPubSubClient<TRouter, TTopics extends PubSubTopics = PubSubTopics>(transport)` wraps `createClient<TRouter>` and adds subscription helpers:
 
 ```ts
 import { createPubSubClient } from '@jsontpc/pubsub';
+import type { AppTopics } from './topics.js';
 
-const client = createPubSubClient<typeof router>(transport);
+const client = createPubSubClient<typeof router, AppTopics>(transport);
 
-// Subscribe — uses transport.onMessage for WS/TCP, auto-polls for HTTP
-await client.$subscribe('prices.updated', (params) => {
-  console.log('price update:', params);
+// $subscribe — callback parameter is typed from AppTopics
+await client.$subscribe('prices.updated', ({ symbol, price }) => {
+  console.log('price update:', symbol, price);
 });
 
-// Unsubscribe from a single topic
+// $unsubscribe — topic is constrained to keyof AppTopics & string
 await client.$unsubscribe('prices.updated');
 
-// Unsubscribe from all topics and stop any polling loops
+// $unsubscribeAll — stops all subscriptions and any polling loops
 await client.$unsubscribeAll();
 ```
 
-All existing methods on the typed proxy (`client.myMethod(params)`) continue to work unchanged.
+`$subscribe` uses `transport.onMessage` for WS/TCP transports and starts an automatic polling loop (`rpc.poll`) for HTTP transports. All existing typed RPC methods (`client.myMethod(params)`) continue to work unchanged.
+
+Full subscription helper signatures:
+
+```ts
+$subscribe<K extends keyof TTopics & string>(
+  topic: K,
+  callback: (data: TTopics[K]) => void,
+): Promise<void>;
+
+$unsubscribe(topic: keyof TTopics & string): Promise<void>;
+
+$unsubscribeAll(): Promise<void>;
+```
 
 ### 13.5 `IEventBus` & `EventBus`
 
-For intra-server communication, a typed event bus can be injected via context:
+For intra-server communication, a typed event bus can be injected via context. `IEventBus<TEvents>` uses the same `TEvents extends Record<string, unknown>` pattern as `TTopics` — keys are event names, values are payload shapes:
 
 ```ts
 import { EventBus } from '@jsontpc/pubsub';
@@ -869,9 +969,29 @@ handler: ({ context }) => {
 
 `EventBus` is **not** a singleton — create one per application and pass it via the typed context (see Section 11). This keeps the server stateless and testable.
 
+`IEventBus<TEvents>` interface defined in `packages/core/src/pubsub.ts`:
+
+```ts
+interface IEventBus<TEvents extends Record<string, unknown> = Record<string, unknown>> {
+  on<K extends keyof TEvents & string>(
+    event: K,
+    listener: (data: TEvents[K]) => void,
+  ): () => void;                                       // returns unsubscribe fn
+  off<K extends keyof TEvents & string>(
+    event: K,
+    listener: (data: TEvents[K]) => void,
+  ): void;
+  emit<K extends keyof TEvents & string>(
+    event: K,
+    data: TEvents[K],
+  ): void;
+}
+```
+
 ### 13.6 Wire Protocol
 
 All pub/sub messages use standard JSON-RPC 2.0 wire format — no new framing or protocol extensions.
+`TTopics` typing is enforced at compile time only; topics travel as plain strings on the wire.
 
 | Direction | Shape | Description |
 |-----------|-------|-------------|
@@ -886,15 +1006,16 @@ All pub/sub messages use standard JSON-RPC 2.0 wire format — no new framing or
 packages/
   core/
     src/
-      pubsub.ts           ← IPubSubTransport, IEventBus interfaces (new)
-      middleware.ts       ← MiddlewareContext, MiddlewareFn (new)
+      pubsub.ts           ← IPubSubTransport, IEventBus, PubSubTopics,
+                            TopicNotification, InferTopicPayload  (new)
+      middleware.ts       ← MiddlewareContext, MiddlewareFn  (new)
       ... (existing files unchanged)
   pubsub/                 ← @jsontpc/pubsub (new package)
     src/
-      registry.ts         ← SubscriptionRegistry
-      server.ts           ← PubSubServer
-      polling.ts          ← PollingAdapter
-      client.ts           ← createPubSubClient
+      registry.ts         ← SubscriptionRegistry<TTopics>
+      server.ts           ← PubSubServer<TRouter, TContext, TTopics>
+      polling.ts          ← PollingAdapter<TTopics>
+      client.ts           ← createPubSubClient<TRouter, TTopics>
       event-bus.ts        ← EventBus<TEvents>
       index.ts
     tests/integration/
@@ -910,7 +1031,9 @@ packages/
 │                          CORE                                    │
 │  types · errors · protocol · router · server · client · adapter  │
 │  middleware.ts  (MiddlewareFn, MiddlewareContext)                 │
-│  pubsub.ts      (IPubSubTransport, IEventBus)       (v0.2 new)  │
+│  pubsub.ts      (IPubSubTransport, IEventBus,        (v0.2 new) │
+│                  PubSubTopics, TopicNotification,               │
+│                  InferTopicPayload)                              │
 └────────┬──────────────────────────────────┬──────────────────────┘
          │ IServerTransport / IPubSubTransport│ IClientTransport
 ┌────────▼────────┐                ┌─────────▼──────────────────┐
@@ -921,8 +1044,9 @@ packages/
          │                                   │
 ┌────────▼───────────────────────────────────▼──────────────────┐
 │                  @jsontpc/pubsub  (v0.2 new)                   │
-│  PubSubServer · SubscriptionRegistry · PollingAdapter          │
-│  createPubSubClient · EventBus                                 │
+│  PubSubServer<TRouter,TContext,TTopics>                        │
+│  SubscriptionRegistry<TTopics> · PollingAdapter<TTopics>       │
+│  createPubSubClient<TRouter,TTopics> · EventBus<TEvents>       │
 └────────────────────────────────────────────────────────────────┘
          │
 ┌────────▼──────────────────────────────────────────────────────┐

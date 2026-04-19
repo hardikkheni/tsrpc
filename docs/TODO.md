@@ -179,23 +179,30 @@
 ### Phase 8 — Pub/Sub & Event Bus 🗓 Planned
 
 > **Goal:** Enable server-to-client push notifications over persistent transports (TCP, WS)
-> with an automatic polling fallback for HTTP. Add a typed internal event bus injectable via
-> context. Prerequisite: Phase 3 WebSocket transport must be complete before WS pub/sub.
+> with an automatic polling fallback for HTTP. Topics and their payloads are **fully type-safe**
+> via a `TTopics extends PubSubTopics` generic threaded through server, registry, polling adapter,
+> and client. Add a typed internal event bus injectable via context. Prerequisite: Phase 3
+> WebSocket transport must be complete before WS pub/sub.
 
-#### `packages/core` — pub/sub interfaces
+#### `packages/core` — pub/sub interfaces and type utilities
 
 - [ ] `packages/core/src/pubsub.ts` — define `IPubSubTransport extends IServerTransport` interface:
   - `readonly supportsPush: true` (type discriminant)
   - `sendToConnection(connectionId: string, message: string): Promise<void>`
   - `onConnection(handler: (connectionId: string) => void): void`
   - `onDisconnect(handler: (connectionId: string) => void): void`
-- [ ] `packages/core/src/pubsub.ts` — define `IEventBus<TEvents extends Record<string, unknown>>` interface:
-  - `on<K extends keyof TEvents>(event: K, listener: (data: TEvents[K]) => void): () => void` (returns unsubscribe fn)
-  - `off<K extends keyof TEvents>(event: K, listener: (data: TEvents[K]) => void): void`
-  - `emit<K extends keyof TEvents>(event: K, data: TEvents[K]): void`
-- [ ] `packages/core/src/index.ts` — export `IPubSubTransport`, `IEventBus`
-- [ ] `packages/core/README.md` — document new interfaces in a "Pub/Sub Interfaces" section
-- [ ] `docs/ARCHITECTURE.md` — add Section 13 (Pub/Sub & Event Bus)
+- [ ] `packages/core/src/pubsub.ts` — export type alias `PubSubTopics = Record<string, unknown>` (named constraint for use in generic bounds)
+- [ ] `packages/core/src/pubsub.ts` — export mapped discriminated union `TopicNotification<TTopics extends PubSubTopics>`:
+  - `type TopicNotification<TTopics> = { [K in keyof TTopics & string]: { topic: K; params: TTopics[K] } }[keyof TTopics & string]`
+  - Narrowing on `.topic` automatically narrows `.params` to the correct payload type
+- [ ] `packages/core/src/pubsub.ts` — export utility `InferTopicPayload<TTopics extends PubSubTopics, K extends keyof TTopics & string> = TTopics[K]`
+- [ ] `packages/core/src/pubsub.ts` — define `IEventBus<TEvents extends Record<string, unknown> = Record<string, unknown>>` interface:
+  - `on<K extends keyof TEvents & string>(event: K, listener: (data: TEvents[K]) => void): () => void` (returns unsubscribe fn)
+  - `off<K extends keyof TEvents & string>(event: K, listener: (data: TEvents[K]) => void): void`
+  - `emit<K extends keyof TEvents & string>(event: K, data: TEvents[K]): void`
+- [ ] `packages/core/src/index.ts` — export `IPubSubTransport`, `IEventBus`, `PubSubTopics`, `TopicNotification`, `InferTopicPayload`
+- [ ] `packages/core/README.md` — document new interfaces and type utilities in a "Pub/Sub Interfaces" section
+- [ ] `docs/ARCHITECTURE.md` — Section 13 updated (complete with typed-topics design) ✓
 
 #### `packages/pubsub/` — new package `@jsontpc/pubsub`
 
@@ -204,28 +211,33 @@
 - [ ] `packages/pubsub/tsup.config.ts` — entry `src/index.ts`, formats `esm` + `cjs`
 - [ ] `packages/pubsub/vitest.config.ts`
 - [ ] `packages/pubsub/README.md` — stub with "Status: Not yet implemented"
-- [ ] `packages/pubsub/src/registry.ts` — `SubscriptionRegistry`: `Map<topic, Set<connectionId>>` with `subscribe(connectionId, topic)`, `unsubscribe(connectionId, topic)`, `getSubscribers(topic): Set<string>`, `removeConnection(connectionId)` (cleans all topics)
-- [ ] `packages/pubsub/src/server.ts` — `PubSubServer<TRouter, TContext>`:
-  - Wraps `JsonRpcServer<TRouter, TContext>` + `IPubSubTransport`
+- [ ] `packages/pubsub/src/registry.ts` — `SubscriptionRegistry<TTopics extends PubSubTopics = PubSubTopics>`:
+  - `subscribe(connectionId: string, topic: keyof TTopics & string): void`
+  - `unsubscribe(connectionId: string, topic: keyof TTopics & string): void`
+  - `getSubscribers(topic: keyof TTopics & string): Set<string>`
+  - `removeConnection(connectionId: string): void` (cleans all topics for that connection)
+- [ ] `packages/pubsub/src/server.ts` — `PubSubServer<TRouter, TContext = unknown, TTopics extends PubSubTopics = PubSubTopics>`:
+  - Wraps `JsonRpcServer<TRouter, TContext>` + `IPubSubTransport` (or any `IServerTransport` for polling path)
   - Auto-registers built-in procedures: `rpc.subscribe`, `rpc.unsubscribe`
-  - `publish(topic: string, params: unknown): Promise<void>` — fan-out via `sendToConnection` to all topic subscribers
-  - `broadcast(method: string, params: unknown): Promise<void>` — send to all active connections
+  - `publish<K extends keyof TTopics & string>(topic: K, data: TTopics[K]): Promise<void>` — fan-out via `sendToConnection` to all topic subscribers
+  - `broadcast<K extends keyof TTopics & string>(topic: K, data: TTopics[K]): Promise<void>` — send to all active connections
   - Falls back to `PollingAdapter` when transport lacks `supportsPush`
-- [ ] `packages/pubsub/src/polling.ts` — `PollingAdapter`:
-  - Per-connection ring buffer of pending notifications (configurable `maxBuffer`, default 100; configurable `ttlMs`, default 60 000)
-  - Registers `rpc.poll` procedure that flushes and returns buffered items as `{ notifications: Array<{ topic: string; params: unknown }> }`
+- [ ] `packages/pubsub/src/polling.ts` — `PollingAdapter<TTopics extends PubSubTopics = PubSubTopics>`:
+  - Per-connection ring buffer of `TopicNotification<TTopics>` items (configurable `maxBuffer`, default 100; configurable `ttlMs`, default 60 000)
+  - Registers `rpc.poll` procedure that flushes and returns `{ notifications: Array<TopicNotification<TTopics>> }`
   - Automatic buffer eviction by TTL
-- [ ] `packages/pubsub/src/client.ts` — `createPubSubClient<TRouter>(transport: IClientTransport)`:
+- [ ] `packages/pubsub/src/client.ts` — `createPubSubClient<TRouter, TTopics extends PubSubTopics = PubSubTopics>(transport: IClientTransport)`:
   - Wraps `createClient<TRouter>(transport)`
-  - Adds `.$subscribe(topic: string, callback: (params: unknown) => void): Promise<void>` — uses `transport.onMessage` for WS/TCP; starts polling loop for HTTP transports
-  - Adds `.$unsubscribe(topic: string): Promise<void>`
-  - Adds `.$unsubscribeAll(): Promise<void>`
-- [ ] `packages/pubsub/src/event-bus.ts` — `EventBus<TEvents>` class implementing `IEventBus<TEvents>` (Map of topic → Set of listeners)
+  - `.$subscribe<K extends keyof TTopics & string>(topic: K, callback: (data: TTopics[K]) => void): Promise<void>` — uses `transport.onMessage` for WS/TCP; starts polling loop for HTTP transports
+  - `.$unsubscribe(topic: keyof TTopics & string): Promise<void>`
+  - `.$unsubscribeAll(): Promise<void>`
+- [ ] `packages/pubsub/src/event-bus.ts` — `EventBus<TEvents extends Record<string, unknown> = Record<string, unknown>>` class implementing `IEventBus<TEvents>` (Map of event → Set of listeners)
 - [ ] `packages/pubsub/src/index.ts` — barrel export of all above
 - [ ] `packages/pubsub/tests/integration/pubsub.test.ts` — integration tests:
   - Subscribe + publish round-trip over TCP (requires `TcpServerTransport` implementing `IPubSubTransport`)
   - Subscribe + publish round-trip over WS (requires `WsServerTransport` implementing `IPubSubTransport`)
   - HTTP polling fallback (subscribe → trigger → poll → receive)
+  - `TopicNotification` discriminated union narrows correctly on `topic`
   - `removeConnection` cleans up subscriptions on disconnect
   - `EventBus` on/off/emit
 - [ ] `packages/pubsub/README.md` — replace stub with real API docs
@@ -240,10 +252,10 @@
 
 #### Examples
 
-- [ ] `examples/pubsub/tcp-server.ts` — `PubSubServer` over TCP; publishes a counter every second
-- [ ] `examples/pubsub/tcp-client.ts` — subscribes, receives push notifications, exits after 5 events
+- [ ] `examples/pubsub/tcp-server.ts` — `PubSubServer` over TCP with typed `AppTopics`; publishes a counter every second
+- [ ] `examples/pubsub/tcp-client.ts` — subscribes with typed callback, receives push notifications, exits after 5 events
 - [ ] `examples/pubsub/http-polling-server.ts` — `PubSubServer` with HTTP polling fallback
-- [ ] `examples/pubsub/http-polling-client.ts` — polls for notifications, prints results, exits
-- [ ] `examples/pubsub/event-bus.ts` — `EventBus` used inside handlers via typed context
+- [ ] `examples/pubsub/http-polling-client.ts` — polls for notifications, narrows via `TopicNotification`, prints results, exits
+- [ ] `examples/pubsub/event-bus.ts` — `EventBus<AppEvents>` used inside handlers via typed context
 - [ ] `examples/package.json` — add `@jsontpc/pubsub workspace:*` dep and `pubsub:*` scripts
 - [ ] `docs/TODO.md` section marked `COMPLETE ✅` when all items above are done

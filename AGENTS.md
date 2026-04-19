@@ -226,7 +226,7 @@ Work through phases **in order**. Do not start a later phase until the current o
 >
 > **Phase 7 — Middleware Pipeline:** `MiddlewareFn<TContext>` / `MiddlewareContext<TContext>` in `@jsontpc/core`. Global middleware via `server.use()`, per-procedure via `procedure.use()`. New exports: `MiddlewareFn`, `MiddlewareContext`.
 >
-> **Phase 8 — Pub/Sub & Event Bus:** New interfaces `IPubSubTransport` / `IEventBus` in `@jsontpc/core`. New package `@jsontpc/pubsub` (`PubSubServer`, `SubscriptionRegistry`, `PollingAdapter`, `createPubSubClient`, `EventBus`). TCP and WS transports implement `IPubSubTransport`; HTTP falls back to polling.
+> **Phase 8 — Pub/Sub & Event Bus:** New interfaces `IPubSubTransport` / `IEventBus` in `@jsontpc/core`. New type utilities `PubSubTopics`, `TopicNotification<TTopics>`, `InferTopicPayload<TTopics, K>` exported from `@jsontpc/core` enable fully type-safe topic→payload mappings. New package `@jsontpc/pubsub` (`PubSubServer<TRouter, TContext, TTopics>`, `SubscriptionRegistry<TTopics>`, `PollingAdapter<TTopics>`, `createPubSubClient<TRouter, TTopics>`, `EventBus<TEvents>`). `TTopics` defaults to `Record<string, unknown>` — untyped usage stays valid; typed usage enforces correct payloads on `publish`, `broadcast`, and `$subscribe` at compile time with no casts. TCP and WS transports implement `IPubSubTransport`; HTTP falls back to polling via `rpc.poll` which returns a typed `TopicNotification<TTopics>` discriminated union.
 >
 > Full implementation checklists: [`docs/TODO.md`](docs/TODO.md) Phases 6–8.
 > Full design: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) sections 11–13.
