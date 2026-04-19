@@ -124,7 +124,37 @@
 > They are **not** yet implemented. No code changes should be made to these sections
 > until Phases 1–5 are fully complete and v0.1.0 is published.
 
-### Phase 6 — Typed Context 🗓 Planned
+### Phase 6 — Plugin System 🗓 Planned
+
+> **Goal:** Give `JsonRpcServer` a first-class extension point so that orthogonal features
+> (pub/sub, introspection, health checks, rate limiting) can register procedures without
+> living in core. Foundation for all subsequent v0.2 phases.
+
+#### `packages/core` — plugin interfaces and built-ins
+
+- [ ] `packages/core/src/plugin.ts` — define and export `IServerPlugin` interface: `{ install(server: JsonRpcServer): void }`
+- [ ] `packages/core/src/server.ts` — add `register(plugin: IServerPlugin): this` (calls `plugin.install(this)`, returns `this` for chaining)
+- [ ] `packages/core/src/server.ts` — add `registerProcedure(name: string, def: ProcedureDef<unknown, unknown>): void` (throws `TypeError` if name already registered; stores in `Map` separate from user router; user router is always authoritative in dispatch)
+- [ ] `packages/core/src/server.ts` — emit dev-mode console warning when a user router procedure name starts with `rpc.`
+- [ ] `packages/core/src/plugins/introspection.ts` — `IntrospectionPlugin` class implementing `IServerPlugin`; registers `rpc.describe` procedure returning `{ methods: string[]; schemas: Record<string, { input?, output? }> }`
+- [ ] `packages/core/src/plugins/health.ts` — `HealthPlugin` class implementing `IServerPlugin`; registers `rpc.ping` procedure returning `{ ok: true; uptime: number }`
+- [ ] `packages/core/src/index.ts` — export `IServerPlugin`, `IntrospectionPlugin`, `HealthPlugin`
+- [ ] `packages/core/tests/unit/plugin.test.ts` — new test file:
+  - `register()` returns server instance (chainable)
+  - `install()` is called synchronously with the server
+  - `registerProcedure()` throws on duplicate name
+  - Plugin procedure is reachable via `server.handle()`
+  - User router procedure shadows same-named plugin procedure
+  - Dev-mode warning on `rpc.*` user procedure name
+  - `IntrospectionPlugin` returns correct method list
+  - `HealthPlugin` returns `{ ok: true, uptime: number }`
+- [ ] `packages/core/README.md` — add Plugin System section with usage example for `register()`, `IntrospectionPlugin`, and `HealthPlugin`
+- [ ] `docs/ARCHITECTURE.md` — §11 Plugin System updated ✓
+
+- [ ] `pnpm typecheck` passes
+- [ ] `pnpm test` passes (no regressions)
+
+### Phase 7 — Typed Context 🗓 Planned
 
 > **Goal:** Allow routers and servers to carry a typed `TContext` generic so handlers receive a
 > fully-typed `context` argument instead of `unknown`. All changes are backward-compatible —
@@ -146,7 +176,7 @@
 - [ ] `pnpm typecheck` passes
 - [ ] `pnpm test` passes (no regressions)
 
-### Phase 7 — Middleware Pipeline 🗓 Planned
+### Phase 8 — Middleware Pipeline 🗓 Planned
 
 > **Goal:** Add composable middleware to `@jsontpc/core`. Middleware runs in a defined order:
 > global server middleware → per-procedure middleware → input validation → handler → output
@@ -176,7 +206,7 @@
 - [ ] `pnpm typecheck` passes
 - [ ] `pnpm test` passes (no regressions)
 
-### Phase 8 — Pub/Sub & Event Bus 🗓 Planned
+### Phase 9 — Pub/Sub & Event Bus 🗓 Planned
 
 > **Goal:** Enable server-to-client push notifications over persistent transports (TCP, WS)
 > with an automatic polling fallback for HTTP. Topics and their payloads are **fully type-safe**
@@ -216,16 +246,17 @@
   - `unsubscribe(connectionId: string, topic: keyof TTopics & string): void`
   - `getSubscribers(topic: keyof TTopics & string): Set<string>`
   - `removeConnection(connectionId: string): void` (cleans all topics for that connection)
-- [ ] `packages/pubsub/src/server.ts` — `PubSubServer<TRouter, TContext = unknown, TTopics extends PubSubTopics = PubSubTopics>`:
-  - Wraps `JsonRpcServer<TRouter, TContext>` + `IPubSubTransport` (or any `IServerTransport` for polling path)
-  - Auto-registers built-in procedures: `rpc.subscribe`, `rpc.unsubscribe`
+- [ ] `packages/pubsub/src/server.ts` — `PubSubServer<TTopics extends PubSubTopics = PubSubTopics>` **implements `IServerPlugin`**:
+  - Constructor: `new PubSubServer<TTopics>(transport: IPubSubTransport | IServerTransport)` — no `server` or `TRouter` generic
+  - `install(server: JsonRpcServer): void` — stores server reference; calls `server.registerProcedure()` for `rpc.subscribe`, `rpc.unsubscribe`; falls back to `PollingAdapter` (which registers `rpc.poll`) when transport lacks `supportsPush`
   - `publish<K extends keyof TTopics & string>(topic: K, data: TTopics[K]): Promise<void>` — fan-out via `sendToConnection` to all topic subscribers
   - `broadcast<K extends keyof TTopics & string>(topic: K, data: TTopics[K]): Promise<void>` — send to all active connections
-  - Falls back to `PollingAdapter` when transport lacks `supportsPush`
+  - No `listen()` method — user calls `transport.listen()` directly
 - [ ] `packages/pubsub/src/polling.ts` — `PollingAdapter<TTopics extends PubSubTopics = PubSubTopics>`:
-  - Per-connection ring buffer of `TopicNotification<TTopics>` items (configurable `maxBuffer`, default 100; configurable `ttlMs`, default 60 000)
-  - Registers `rpc.poll` procedure that flushes and returns `{ notifications: Array<TopicNotification<TTopics>> }`
-  - Automatic buffer eviction by TTL
+  - Per-session ring buffer of `TopicNotification<TTopics>` items keyed by `sessionId` (client-supplied UUID)
+  - Registers `rpc.poll` procedure with params `{ sessionId: string }` that flushes and returns `{ notifications: Array<TopicNotification<TTopics>> }`
+  - `rpc.subscribe` and `rpc.unsubscribe` params include `sessionId` for HTTP sessions
+  - Configurable `maxBuffer` (default 100 items) and `ttlMs` (default 60 000 ms); sessions with no activity evicted after `ttlMs`
 - [ ] `packages/pubsub/src/client.ts` — `createPubSubClient<TRouter, TTopics extends PubSubTopics = PubSubTopics>(transport: IClientTransport)`:
   - Wraps `createClient<TRouter>(transport)`
   - `.$subscribe<K extends keyof TTopics & string>(topic: K, callback: (data: TTopics[K]) => void): Promise<void>` — uses `transport.onMessage` for WS/TCP; starts polling loop for HTTP transports

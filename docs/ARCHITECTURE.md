@@ -36,24 +36,31 @@ This document describes the internal design of `jsontpc` — how the layers fit 
 8. [Error Handling](#8-error-handling)
 9. [Package Layout & Build](#9-package-layout--build)
 10. [Design Decisions & Trade-offs](#10-design-decisions--trade-offs)
-11. [Typed Context — Planned (v0.2)](#11-typed-context--planned-v02)
-    - [createProcedure Factory](#111-createprocedure-factory)
-    - [JsonRpcServer TContext Generic](#112-jsonrpcserver-tcontext-generic)
-    - [Adapter Context Generics](#113-adapter-context-generics)
-12. [Middleware Pipeline — Planned (v0.2)](#12-middleware-pipeline--planned-v02)
-    - [MiddlewareContext & MiddlewareFn](#121-middlewarecontext--middlewarefn)
-    - [Global Middleware](#122-global-middleware)
-    - [Per-Procedure Middleware](#123-per-procedure-middleware)
-    - [Execution Order](#124-execution-order)
-13. [Pub/Sub & Event Bus — Planned (v0.2)](#13-pubsub--event-bus--planned-v02)
-    - [IPubSubTransport Interface](#131-ipubsubtransport-interface)
-    - [PubSubServer](#132-pubsubserver)
-    - [Polling Fallback](#133-polling-fallback)
-    - [PubSub Client](#134-pubsub-client)
-    - [IEventBus & EventBus](#135-ieventbus--eventbus)
-    - [Wire Protocol](#136-wire-protocol)
-    - [Package Layout (v0.2)](#137-package-layout-v02)
-14. [Examples](#14-examples)
+11. [Plugin System — Planned (v0.2)](#11-plugin-system--planned-v02)
+    - [Why a Plugin System](#111-why-a-plugin-system)
+    - [IServerPlugin Interface](#112-iservertplugin-interface)
+    - [JsonRpcServer Plugin API](#113-jsonrpcserver-plugin-api)
+    - [rpc.* Namespace](#114-rpc-namespace)
+    - [Built-in Plugins](#115-built-in-plugins)
+    - [Third-Party Plugins](#116-third-party-plugins)
+12. [Typed Context — Planned (v0.2)](#12-typed-context--planned-v02)
+    - [createProcedure Factory](#121-createprocedure-factory)
+    - [JsonRpcServer TContext Generic](#122-jsonrpcserver-tcontext-generic)
+    - [Adapter Context Generics](#123-adapter-context-generics)
+13. [Middleware Pipeline — Planned (v0.2)](#13-middleware-pipeline--planned-v02)
+    - [MiddlewareContext & MiddlewareFn](#131-middlewarecontext--middlewarefn)
+    - [Global Middleware](#132-global-middleware)
+    - [Per-Procedure Middleware](#133-per-procedure-middleware)
+    - [Execution Order](#134-execution-order)
+14. [Pub/Sub & Event Bus — Planned (v0.2)](#14-pubsub--event-bus--planned-v02)
+    - [IPubSubTransport Interface](#141-ipubsubtransport-interface)
+    - [PubSubServer](#142-pubsubserver)
+    - [Polling Fallback](#143-polling-fallback)
+    - [PubSub Client](#144-pubsub-client)
+    - [IEventBus & EventBus](#145-ieventbus--eventbus)
+    - [Wire Protocol](#146-wire-protocol)
+    - [Package Layout (v0.2)](#147-package-layout-v02)
+15. [Examples](#15-examples)
 
 ---
 
@@ -69,19 +76,22 @@ This document describes the internal design of `jsontpc` — how the layers fit 
 │                        CORE                              │
 │  types.ts · errors.ts · protocol.ts · router.ts         │
 │  server.ts (JsonRpcServer) · client.ts (createClient)   │
+│  plugin.ts (IServerPlugin) · plugins/ (built-ins)       │
 │                                                          │
 │  • Zero runtime dependencies                             │
 │  • Zod only used when .input()/.output() called          │
 │  • Works in any JS environment                           │
-└────────┬─────────────────────────────┬───────────────────┘
-         │ IServerTransport             │ IClientTransport
-┌────────▼────────┐          ┌─────────▼────────────────┐
-│  Server         │          │  Client                  │
-│  Transports     │          │  Transports              │
-│  http · tcp · ws│          │  http · tcp · ws         │
-└────────┬────────┘          └─────────┬────────────────┘
-         │                             │
-┌────────▼─────────────────────────────▼────────────────┐
+└────────┬──────────────────────┬──────────────────────────┘
+         │ IServerTransport     │ server.register(plugin)
+         │ IClientTransport     │
+┌────────▼────────┐    ┌────────▼─────────────────────────┐
+│  Transports     │    │  Plugins                         │
+│  Server+Client  │    │  IntrospectionPlugin             │
+│  http · tcp · ws│    │  HealthPlugin                    │
+└────────┬────────┘    │  PubSubServer (@jsontpc/pubsub)  │
+         │             │  … third-party …                 │
+         │             └──────────────────────────────────┘
+┌────────▼──────────────────────────────────────────────┐
 │                  Framework Adapters                     │
 │               express · fastify · nestjs               │
 └────────────────────────────────────────────────────────┘
@@ -208,6 +218,8 @@ These are used by `createClient` to type the proxy object at the call site with 
 handle(rawRequest: AnyRequest, context?)
   ├─ detectVersion()
   ├─ look up procedure by req.method
+  │    ├─ found in user router → use it  (user is always authoritative)
+  │    ├─ found in plugin registry → use it
   │    └─ not found → JsonRpcError(-32601)
   ├─ validate params with inputSchema (if present)
   │    └─ Zod failure → JsonRpcError(-32602)
@@ -239,6 +251,30 @@ handleBatch(requests: AnyBatch, context?)
 ```
 
 The spec says the server MAY process batch concurrently; we always do.
+
+### 4.4 Plugin API
+
+`JsonRpcServer` exposes two methods exclusively for plugin authors:
+
+```ts
+/** Install a plugin. Calls plugin.install(this) and returns `this` for chaining. */
+register(plugin: IServerPlugin): this;
+
+/** Register a procedure from a plugin. Throws if the name is already registered. */
+registerProcedure(name: string, def: ProcedureDef<unknown, unknown>): void;
+```
+
+`register()` calls `plugin.install(this)` synchronously and returns `this`, enabling fluent chaining:
+
+```ts
+const server = new JsonRpcServer(router)
+  .register(new IntrospectionPlugin())
+  .register(new HealthPlugin());
+```
+
+`registerProcedure()` adds the procedure to an internal `Map<string, ProcedureDef>` that is separate from the user router. **It throws if the name is already registered** — collisions between plugins are always bugs, not an overridable configuration.
+
+> **Note:** `register()` and `registerProcedure()` are intended for plugin authors, not application code. All user-defined procedures belong in `createRouter()`.
 
 ---
 
@@ -300,6 +336,8 @@ interface IFramer {
 - Pending requests are keyed by `id` in a `Map<JsonRpcId, { resolve, reject }>` 
 - Incoming messages are decoded, matched by `id`, and resolved
 
+**Connection identity:** `TcpServerTransport` assigns each accepted socket a unique `connectionId` (UUID v4) and passes it as part of the context when calling `server.handle(req, { connectionId })`. Plugin procedures (such as `rpc.subscribe` from `@jsontpc/pubsub`) rely on this `connectionId` to track per-connection subscriptions and route push notifications. With Phase 7 typed context you can declare `TContext = { connectionId: string } & MyAppContext` to merge transport-provided and application-level context.
+
 ### 5.5 WebSocket Transport
 
 Similar to TCP but message boundaries are already handled by the WS protocol.
@@ -307,6 +345,8 @@ Similar to TCP but message boundaries are already handled by the WS protocol.
 - **Server**: registers `message` event on `ws.WebSocket.Server`; per-connection handler
 - **Client**: single `ws.WebSocket` connection; same pending-request `Map` approach as TCP
 - Supports **notifications** from server → client (one-way push) in addition to request-response
+
+**Connection identity:** `WsServerTransport` assigns each WebSocket connection a unique `connectionId` (UUID v4) and passes it as context on every `server.handle()` call — identical in shape to `TcpServerTransport`. This enables plugins to maintain per-connection subscription state for server-push scenarios.
 
 ---
 
@@ -506,6 +546,10 @@ jsontpc-workspace/              ← monorepo root (private, not published)
         server.ts
         client.ts
         adapter.ts              ← IFrameworkAdapter, createRequestHandler, bindAdapter
+        plugin.ts               ← IServerPlugin interface  (v0.2 new)
+        plugins/
+          introspection.ts      ← IntrospectionPlugin (rpc.describe)  (v0.2 new)
+          health.ts             ← HealthPlugin (rpc.ping)  (v0.2 new)
         index.ts                ← barrel re-export
       tests/unit/
         protocol.test.ts
@@ -616,17 +660,117 @@ import { JsonRpcError } from './errors.js';
 | `NODE_ENV` guards on error details | Prevents internal stack traces from leaking to clients in production (OWASP A05: Security Misconfiguration) |
 | `IFrameworkAdapter` + `createRequestHandler` in core | Framework adapter authors only implement `extractBody` / `writeResponse`; dispatch, framing, and error handling live in core — no duplication across adapter packages |
 | `bindAdapter` as the single wiring point | All first-party and third-party adapters use the same integration contract — behaviour is consistent and the dispatch loop is never reimplemented |
+| Plugin system (`IServerPlugin`) | Features like pub/sub, introspection, and health checks need to register procedures but must not live in core. A single-method interface keeps the extension contract minimal; independent package versioning follows naturally; `register()` chains fluently and `registerProcedure()` fails fast on collisions |
 
 ---
 
-## 11. Typed Context — Planned (v0.2)
+## 11. Plugin System — Planned (v0.2)
+
+> **🗓 Planned (v0.2)** — This section describes a feature that has not yet been implemented.
+> Design is final; implementation will begin after v0.1.0 is published (Phase 5 complete).
+
+### 11.1 Why a Plugin System
+
+`JsonRpcServer` is a pure dispatch engine. Features like pub/sub, schema introspection, and health checks are orthogonal — they need to register procedures but have no reason to live in core, and bloating core would violate the zero-dependency policy and force irrelevant code on every user.
+
+The plugin system solves this with a single-method interface. Any package — first-party or third-party — that wants to inject procedures into a server implements `IServerPlugin` and calls `server.register(plugin)`.
+
+**Why it makes sense:**
+
+| Argument | Detail |
+|----------|--------|
+| Orthogonality | Pub/sub, health, auth, metrics are side concerns — don't belong in the dispatch engine |
+| Single contract | `IServerPlugin` is one method; zero friction for third-party plugin authors |
+| No alternatives needed | Without this, users must call `registerProcedure()` manually or wrap the server class |
+| Independent versioning | `@jsontpc/pubsub@2` can ship without bumping `@jsontpc/core` |
+| Familiar pattern | Mirrors Fastify plugins and Express middleware — a known composition model for Node.js developers |
+| Correct IoC | Plugin receives the server via `install()`, not the constructor — no side effects on `new` |
+
+### 11.2 `IServerPlugin` Interface
+
+Defined in `packages/core/src/plugin.ts`:
+
+```ts
+interface IServerPlugin {
+  /**
+   * Called by JsonRpcServer.register(). Store the server reference, register
+   * procedures, and wire any transport event handlers here.
+   */
+  install(server: JsonRpcServer): void;
+}
+```
+
+The interface is intentionally minimal. Plugins are named by their role, not by convention (e.g. `PubSubServer`, `HealthPlugin`) — the interface is the only contract.
+
+### 11.3 `JsonRpcServer` Plugin API
+
+See also [§4.4 Plugin API](#44-plugin-api).
+
+```ts
+// Install a plugin — calls plugin.install(this), returns this for chaining
+server.register(plugin: IServerPlugin): this
+
+// Register a single procedure from inside install()
+server.registerProcedure(name: string, def: ProcedureDef<unknown, unknown>): void
+```
+
+**Dispatch order** (see also §4.1): user router procedures are checked first (user is always authoritative); plugin-registered procedures are checked second. A user can deliberately shadow a plugin procedure by defining one with the same name in their router.
+
+**Collision guard:** `registerProcedure()` throws a `TypeError` if the name is already taken by another plugin procedure. This is intentional — plugin conflicts are bugs, not configuration.
+
+### 11.4 `rpc.*` Namespace
+
+All first-party plugins register methods under the `rpc.*` prefix. This namespace is reserved:
+
+- User routers **must not** define procedures whose names start with `rpc.`
+- In development mode (`NODE_ENV !== 'production'`), `JsonRpcServer` emits a console warning if a user router procedure name collides with the `rpc.*` namespace
+
+Third-party plugins may use any other prefix (e.g. `ext.myFeature`).
+
+### 11.5 Built-in Plugins
+
+Two plugins ship inside `@jsontpc/core` — they are tiny, have no extra dependencies, and are immediately useful to every user.
+
+| Class | Package | Procedure | Response |
+|-------|---------|-----------|----------|
+| `IntrospectionPlugin` | `@jsontpc/core` | `rpc.describe` | `{ methods: string[]; schemas: Record<string, { input?, output? }> }` — the router's method names and JSON Schema shapes of their input/output |
+| `HealthPlugin` | `@jsontpc/core` | `rpc.ping` | `{ ok: true; uptime: number }` — useful for load-balancer / readiness probes |
+
+Usage:
+
+```ts
+import { JsonRpcServer, IntrospectionPlugin, HealthPlugin } from '@jsontpc/core';
+
+const server = new JsonRpcServer(router)
+  .register(new IntrospectionPlugin())
+  .register(new HealthPlugin());
+```
+
+### 11.6 Third-Party Plugins
+
+Any package can implement `IServerPlugin`. Possible ecosystem plugins (not shipped by this repo):
+
+| Plugin | What it does |
+|--------|-------------|
+| `RateLimitPlugin` | Tracks call frequency per `connectionId` / IP; throws a custom error code on overflow |
+| `AuthPlugin` | Registers `rpc.auth` + pre-dispatch token validation via Phase 8 middleware |
+| `CachePlugin` | TTL memoization keyed on method name + serialised params |
+| `LoggingPlugin` | Structured per-request logs (pre/post via Phase 8 middleware) |
+| `MetricsPlugin` | Prometheus / OTEL counters per method |
+| `TracingPlugin` | OTEL span per RPC call |
+
+Third-party plugins are published to npm independently and installed like any other package. They interact with `JsonRpcServer` only via the stable `IServerPlugin` interface.
+
+---
+
+## 12. Typed Context — Planned (v0.2)
 
 > **🗓 Planned (v0.2)** — This section describes a feature that has not yet been implemented.
 > Design is final; implementation will begin after v0.1.0 is published (Phase 5 complete).
 
 Today `HandlerContext.context` is typed as `unknown`, requiring manual casts inside every handler. v0.2 threads an optional `TContext` generic through the procedure builder, router, server, and adapter layers so that context is fully type-safe end-to-end with zero breaking changes.
 
-### 11.1 `createProcedure` Factory
+### 12.1 `createProcedure` Factory
 
 A new `createProcedure<TContext>()` factory returns a `ProcedureBuilder<unknown, unknown, TContext>`:
 
@@ -650,7 +794,7 @@ const router = createRouter({
 
 The existing `procedure` singleton is unchanged — it is equivalent to `createProcedure<unknown>()` and continues to work without modification.
 
-### 11.2 `JsonRpcServer` TContext Generic
+### 12.2 `JsonRpcServer` TContext Generic
 
 `JsonRpcServer` gains a second optional generic `TContext = unknown`:
 
@@ -662,7 +806,7 @@ const server = new JsonRpcServer<typeof router, MyContext>(router);
 
 When `TContext` is omitted the server behaves exactly as before.
 
-### 11.3 Adapter Context Generics
+### 12.3 Adapter Context Generics
 
 `createRequestHandler` and `bindAdapter` gain matching optional context generics:
 
@@ -678,13 +822,13 @@ All generic parameters default to `unknown` — no change at call sites that do 
 
 ---
 
-## 12. Middleware Pipeline — Planned (v0.2)
+## 13. Middleware Pipeline — Planned (v0.2)
 
 > **🗓 Planned (v0.2)** — This section describes a feature that has not yet been implemented.
 
-Middleware intercepts every dispatch cycle. It is composable (multiple middleware can be stacked), reusable, and strongly typed via the `TContext` generic introduced in Section 11.
+Middleware intercepts every dispatch cycle. It is composable (multiple middleware can be stacked), reusable, and strongly typed via the `TContext` generic introduced in Section 12.
 
-### 12.1 `MiddlewareContext` & `MiddlewareFn`
+### 13.1 `MiddlewareContext` & `MiddlewareFn`
 
 Defined in the new `packages/core/src/middleware.ts`:
 
@@ -701,7 +845,7 @@ type MiddlewareFn<TContext = unknown> =
   (ctx: MiddlewareContext<TContext>, next: () => Promise<void>) => Promise<void>;
 ```
 
-### 12.2 Global Middleware
+### 13.2 Global Middleware
 
 Global middleware is registered on the server instance and runs for **every** procedure:
 
@@ -717,7 +861,7 @@ server.use(async (ctx, next) => {
 });
 ```
 
-### 12.3 Per-Procedure Middleware
+### 13.3 Per-Procedure Middleware
 
 Per-procedure middleware is chained on the builder and runs only for that procedure:
 
@@ -739,7 +883,7 @@ const router = createRouter({
 
 `.use()` may be called multiple times; middleware is composed left-to-right.
 
-### 12.4 Execution Order
+### 13.4 Execution Order
 
 ```
 Incoming request
@@ -761,7 +905,7 @@ If any middleware throws a `JsonRpcError`, subsequent middleware and the handler
 
 ---
 
-## 13. Pub/Sub & Event Bus — Planned (v0.2)
+## 14. Pub/Sub & Event Bus — Planned (v0.2)
 
 > **🗓 Planned (v0.2)** — This section describes a feature that has not yet been implemented.
 > Prerequisite: Phase 3 WebSocket transport must be complete before WS pub/sub can be added.
@@ -774,7 +918,7 @@ v0.2 adds first-class support for server-to-client push notifications. The desig
 - Transports that support persistent connections (`@jsontpc/tcp`, `@jsontpc/ws`) implement `IPubSubTransport`; HTTP transports fall back to polling
 - Topic→payload mappings are **fully type-safe**: declare a `TTopics` interface once; every `publish`, `broadcast`, `$subscribe`, and `rpc.poll` payload is inferred from it at compile time
 
-### 13.0 Typed Topics
+### 14.0 Typed Topics
 
 All pub/sub APIs accept an optional `TTopics extends PubSubTopics` generic parameter
 (where `PubSubTopics = Record<string, unknown>`). Declare an interface that maps topic names to
@@ -824,7 +968,7 @@ export type InferTopicPayload<
 
 `InferTopicPayload` follows the same ergonomic pattern as `InferProcedureInput` / `InferProcedureOutput` from the router layer.
 
-### 13.1 `IPubSubTransport` Interface
+### 14.1 `IPubSubTransport` Interface
 
 Defined in `packages/core/src/pubsub.ts`:
 
@@ -839,22 +983,35 @@ interface IPubSubTransport extends IServerTransport {
 
 `TcpServerTransport` and `WsServerTransport` will implement `IPubSubTransport`. HTTP transports do not — `PubSubServer` detects this at construction time and activates `PollingAdapter`.
 
-### 13.2 `PubSubServer`
+### 14.2 `PubSubServer`
 
-`PubSubServer<TRouter, TContext = unknown, TTopics extends PubSubTopics = PubSubTopics>` wraps an
-existing `JsonRpcServer` and an `IPubSubTransport` (or any `IServerTransport` for the polling path):
+`PubSubServer<TTopics extends PubSubTopics = PubSubTopics>` **implements `IServerPlugin`** and holds a reference to an `IPubSubTransport`. It does not own the transport lifecycle and does not have a `listen()` method — the user starts and stops the transport directly.
+
+**Constructor:**
 
 ```ts
+new PubSubServer<TTopics>(transport: IPubSubTransport)
+```
+
+No `TRouter` generic and no `server` argument in the constructor — the server reference is received lazily via `install(server)` when `server.register(pubsub)` is called.
+
+**Usage:**
+
+```ts
+import { JsonRpcServer } from '@jsontpc/core';
+import { WsServerTransport } from '@jsontpc/ws';
 import { PubSubServer } from '@jsontpc/pubsub';
 import type { AppTopics } from './topics.js';
 
-const pubsub = new PubSubServer<typeof router, MyContext, AppTopics>(server, transport);
-await pubsub.listen(4000);
+const server = new JsonRpcServer(router);
+const transport = new WsServerTransport(server);
+const pubsub = new PubSubServer<AppTopics>(transport);
 
-// Publish to all subscribers of a topic — payload type is inferred from AppTopics
+server.register(pubsub);   // calls pubsub.install(server) → registers rpc.subscribe etc.
+transport.listen(4000);    // user controls the lifecycle
+
+// Later, publish a topic
 await pubsub.publish('prices.updated', { symbol: 'BTC', price: 65000 });
-
-// Broadcast a notification to every connected client
 await pubsub.broadcast('system.ping', {});
 ```
 
@@ -872,21 +1029,34 @@ broadcast<K extends keyof TTopics & string>(
 ): Promise<void>;
 ```
 
-`PubSubServer` automatically registers two built-in procedures on the underlying `JsonRpcServer`:
+`PubSubServer.install()` calls `server.registerProcedure()` for each built-in procedure:
 
 | Method | Params | Description |
 |--------|--------|-------------|
-| `rpc.subscribe` | `{ topic: keyof TTopics & string }` | Subscribe the connection to a topic |
-| `rpc.unsubscribe` | `{ topic: keyof TTopics & string }` | Unsubscribe from a topic |
+| `rpc.subscribe` | `{ topic: keyof TTopics & string; sessionId?: string }` | Subscribe the connection (or HTTP session) to a topic |
+| `rpc.unsubscribe` | `{ topic: keyof TTopics & string; sessionId?: string }` | Unsubscribe from a topic |
 
-### 13.3 Polling Fallback
+For TCP and WS transports, subscriptions are keyed by the `connectionId` injected into context. For HTTP, subscriptions are keyed by the client-supplied `sessionId` UUID in params (see §14.3).
 
-When the transport does not implement `IPubSubTransport`, `PubSubServer` activates the built-in `PollingAdapter`:
 
-- Each connection (identified by a request-scoped token) gets a ring buffer of pending notifications typed as `TopicNotification<TTopics>`
-- A third built-in procedure `rpc.poll` is registered; the client calls it periodically
+### 14.3 Polling Fallback
+
+When the transport does not implement `IPubSubTransport` (i.e., HTTP), `PubSubServer` activates the built-in `PollingAdapter`. HTTP has no persistent connection, so the client must supply a stable identity across requests.
+
+**`sessionId`** is a client-generated UUID v4 that the client includes in every `rpc.subscribe`, `rpc.unsubscribe`, and `rpc.poll` params object. This identifies the logical session for the server's per-client notification ring buffer.
+
+- Each session (identified by `sessionId`) gets a ring buffer of pending notifications typed as `TopicNotification<TTopics>`
+- `rpc.poll` is registered as a third built-in procedure; the client calls it periodically
+- `rpc.poll` params: `{ sessionId: string }` — no topic filter; returns all queued notifications for that session
 - `rpc.poll` returns `{ notifications: Array<TopicNotification<TTopics>> }` — a discriminated union keyed on `topic` — and clears the buffer
 - Buffer is configurable: `maxBuffer` (default 100 items) and `ttlMs` (default 60 000 ms)
+- Sessions with no `rpc.poll` call within `ttlMs` are evicted automatically
+
+`rpc.subscribe` and `rpc.unsubscribe` params for HTTP polling:
+
+```ts
+{ topic: keyof TTopics & string; sessionId: string }
+```
 
 `TopicNotification<TTopics>` is a mapped discriminated union exported from `@jsontpc/core`:
 
@@ -907,7 +1077,7 @@ for (const n of result.notifications) {
 }
 ```
 
-### 13.4 PubSub Client
+### 14.4 PubSub Client
 
 `createPubSubClient<TRouter, TTopics extends PubSubTopics = PubSubTopics>(transport)` wraps `createClient<TRouter>` and adds subscription helpers:
 
@@ -944,7 +1114,7 @@ $unsubscribe(topic: keyof TTopics & string): Promise<void>;
 $unsubscribeAll(): Promise<void>;
 ```
 
-### 13.5 `IEventBus` & `EventBus`
+### 14.5 `IEventBus` & `EventBus`
 
 For intra-server communication, a typed event bus can be injected via context. `IEventBus<TEvents>` uses the same `TEvents extends Record<string, unknown>` pattern as `TTopics` — keys are event names, values are payload shapes:
 
@@ -967,7 +1137,7 @@ handler: ({ context }) => {
 }
 ```
 
-`EventBus` is **not** a singleton — create one per application and pass it via the typed context (see Section 11). This keeps the server stateless and testable.
+`EventBus` is **not** a singleton — create one per application and pass it via the typed context (see Section 12). This keeps the server stateless and testable.
 
 `IEventBus<TEvents>` interface defined in `packages/core/src/pubsub.ts`:
 
@@ -988,19 +1158,21 @@ interface IEventBus<TEvents extends Record<string, unknown> = Record<string, unk
 }
 ```
 
-### 13.6 Wire Protocol
+### 14.6 Wire Protocol
 
 All pub/sub messages use standard JSON-RPC 2.0 wire format — no new framing or protocol extensions.
 `TTopics` typing is enforced at compile time only; topics travel as plain strings on the wire.
 
 | Direction | Shape | Description |
 |-----------|-------|-------------|
-| Client → Server | `{ jsonrpc: "2.0", method: "rpc.subscribe", params: { topic }, id }` | Subscribe request (expects response) |
-| Client → Server | `{ jsonrpc: "2.0", method: "rpc.unsubscribe", params: { topic }, id }` | Unsubscribe request |
-| Client → Server | `{ jsonrpc: "2.0", method: "rpc.poll", id }` | Poll request (HTTP fallback only) |
-| Server → Client | `{ jsonrpc: "2.0", method: topic, params: data }` | Push notification (no `id` — standard JSON-RPC notification) |
+| Client → Server | `{ jsonrpc: "2.0", method: "rpc.subscribe", params: { topic }, id }` | Subscribe request via TCP/WS — connection identified by `connectionId` in server context |
+| Client → Server | `{ jsonrpc: "2.0", method: "rpc.subscribe", params: { topic, sessionId }, id }` | Subscribe request via HTTP — client UUID `sessionId` identifies the polling session |
+| Client → Server | `{ jsonrpc: "2.0", method: "rpc.unsubscribe", params: { topic }, id }` | Unsubscribe via TCP/WS |
+| Client → Server | `{ jsonrpc: "2.0", method: "rpc.unsubscribe", params: { topic, sessionId }, id }` | Unsubscribe via HTTP |
+| Client → Server | `{ jsonrpc: "2.0", method: "rpc.poll", params: { sessionId }, id }` | Poll request (HTTP fallback only) |
+| Server → Client | `{ jsonrpc: "2.0", method: topic, params: data }` | Push notification (no `id` — standard JSON-RPC notification; TCP/WS only) |
 
-### 13.7 Package Layout (v0.2)
+### 14.7 Package Layout (v0.2)
 
 ```
 packages/
@@ -1009,11 +1181,15 @@ packages/
       pubsub.ts           ← IPubSubTransport, IEventBus, PubSubTopics,
                             TopicNotification, InferTopicPayload  (new)
       middleware.ts       ← MiddlewareContext, MiddlewareFn  (new)
+      plugin.ts           ← IServerPlugin  (new)
+      plugins/
+        introspection.ts  ← IntrospectionPlugin  (new)
+        health.ts         ← HealthPlugin  (new)
       ... (existing files unchanged)
   pubsub/                 ← @jsontpc/pubsub (new package)
     src/
       registry.ts         ← SubscriptionRegistry<TTopics>
-      server.ts           ← PubSubServer<TRouter, TContext, TTopics>
+      server.ts           ← PubSubServer<TTopics> implements IServerPlugin
       polling.ts          ← PollingAdapter<TTopics>
       client.ts           ← createPubSubClient<TRouter, TTopics>
       event-bus.ts        ← EventBus<TEvents>
@@ -1057,7 +1233,7 @@ packages/
 
 ---
 
-## 14. Examples
+## 15. Examples
 
 Runnable examples live in `examples/` at the monorepo root. Each sub-folder maps to a package.
 
