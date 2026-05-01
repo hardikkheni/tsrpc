@@ -17,14 +17,17 @@
     "ws:server": "tsx ws/server.ts",
     "ws:client": "tsx ws/client.ts",
     "express:server": "tsx express/server.ts",
-    "express:client": "tsx express/client.ts"
+    "express:client": "tsx express/client.ts",
+    "nestjs:server": "tsx nestjs/main.ts",
+    "nestjs:client": "tsx nestjs/client.ts"
   },
   "dependencies": {
     "@jsontpc/core": "workspace:*",
     "@jsontpc/tcp": "workspace:*",
     "@jsontpc/http": "workspace:*",
     "@jsontpc/ws": "workspace:*",
-    "@jsontpc/express": "workspace:*"
+    "@jsontpc/express": "workspace:*",
+    "@jsontpc/nestjs": "workspace:*"
   },
   "devDependencies": {
     "tsx": "^4.0.0",
@@ -32,6 +35,11 @@
     "@types/node": "^22.0.0",
     "ws": "^8.0.0",
     "express": "^5.0.0",
-    "@types/express": "^5.0.0"
+    "@types/express": "^5.0.0",
+    "@nestjs/common": "^10.0.0",
+    "@nestjs/core": "^10.0.0",
+    "@nestjs/platform-express": "^10.0.0",
+    "reflect-metadata": "^0.2.0",
+    "rxjs": "^7.0.0"
   }
 }

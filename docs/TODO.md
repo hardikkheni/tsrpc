@@ -101,16 +101,20 @@
 - [ ] `packages/fastify/tests/integration/fastify.test.ts`
 - [ ] `examples/fastify/app.ts`
 
-#### NestJS (`packages/nestjs`)
-- [ ] `packages/nestjs/src/decorator.ts` — `@JsonRpcHandler()` method decorator
-- [ ] `packages/nestjs/src/service.ts` — `JsonRpcService` injectable
-- [ ] `packages/nestjs/src/module.ts` — `JsonRpcModule.forRoot()` dynamic module
-- [ ] `packages/nestjs/src/index.ts` (replace stub)
-- [ ] `packages/nestjs/tests/integration/nestjs.test.ts`
-- [ ] `examples/nestjs/main.ts` + `examples/nestjs/app.module.ts` + `examples/nestjs/math.service.ts`
+#### NestJS (`packages/nestjs`) — COMPLETE ✅
+- [x] `packages/nestjs/src/decorator.ts` — `@JsonRpcHandler()` method decorator
+- [x] `packages/nestjs/src/service.ts` — `JsonRpcService` injectable
+- [x] `packages/nestjs/src/module.ts` — `JsonRpcModule.forRoot()` dynamic module
+- [x] `packages/nestjs/src/index.ts` (replace stub)
+- [x] `packages/nestjs/tests/integration/nestjs.test.ts`
+- [x] `examples/nestjs/main.ts` + `examples/nestjs/app.module.ts` + `examples/nestjs/math.service.ts` + `examples/nestjs/client.ts`
+- [x] `packages/nestjs/README.md` updated with real API docs
+- [x] Root `README.md` updated (✅ Stable, install block, Quick Start, examples)
+- [x] `examples/package.json` — dep + scripts added
+- [x] `docs/TODO.md` section marked `COMPLETE ✅`
 
-- [ ] `pnpm typecheck` passes
-- [ ] `pnpm test` passes
+- [x] `pnpm typecheck` passes
+- [x] `pnpm test` passes
 
 ### Phase 5 — Polish & Release
 - [ ] `pnpm check:publint` — no export map errors for all 7 packages
