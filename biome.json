@@ -25,10 +25,25 @@
     "lineWidth": 100
   },
   "javascript": {
+    "parser": {
+      "unsafeParameterDecoratorsEnabled": true
+    },
     "formatter": {
       "quoteStyle": "single",
       "trailingCommas": "all",
       "semicolons": "always"
     }
-  }
+  },
+  "overrides": [
+    {
+      "include": ["packages/nestjs/**"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noStaticOnlyClass": "off"
+          }
+        }
+      }
+    }
+  ]
 }

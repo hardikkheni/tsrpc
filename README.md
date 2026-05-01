@@ -36,6 +36,7 @@
   - [TCP](#tcp)
   - [WebSocket](#websocket)
   - [Express](#express)
+  - [NestJS](#nestjs)
   - [Custom Adapters](#custom-adapters)
 - [❌ Error Codes](#-error-codes)
 - [🧪 Examples](#-examples)
@@ -54,7 +55,7 @@
 | [`@jsontpc/ws`](packages/ws/README.md) | [![npm](https://img.shields.io/npm/v/@jsontpc/ws?label=&color=cb3837)](https://www.npmjs.com/package/@jsontpc/ws) | [![npm](https://img.shields.io/npm/dm/@jsontpc/ws?label=)](https://www.npmjs.com/package/@jsontpc/ws) | ✅ WebSocket transport (persistent bidirectional, `ws` library) |
 | [`@jsontpc/express`](packages/express/README.md) | [![npm](https://img.shields.io/npm/v/@jsontpc/express?label=&color=cb3837)](https://www.npmjs.com/package/@jsontpc/express) | [![npm](https://img.shields.io/npm/dm/@jsontpc/express?label=)](https://www.npmjs.com/package/@jsontpc/express) | ✅ Express middleware adapter |
 | [`@jsontpc/fastify`](packages/fastify/README.md) | — | — | 🚧 Fastify plugin adapter |
-| [`@jsontpc/nestjs`](packages/nestjs/README.md) | — | — | 🚧 NestJS dynamic module + decorator adapter |
+| [`@jsontpc/nestjs`](packages/nestjs/README.md) | [![npm](https://img.shields.io/npm/v/@jsontpc/nestjs?label=&color=cb3837)](https://www.npmjs.com/package/@jsontpc/nestjs) | [![npm](https://img.shields.io/npm/dm/@jsontpc/nestjs?label=)](https://www.npmjs.com/package/@jsontpc/nestjs) | ✅ NestJS dynamic module + decorator adapter |
 | [`@jsontpc/pubsub`](packages/pubsub/README.md) | — | — | 🗓 v0.2 — Pub/sub push, typed topics, polling fallback, EventBus |
 
 ---
@@ -67,6 +68,7 @@ pnpm add @jsontpc/http        # HTTP transport
 pnpm add @jsontpc/tcp         # TCP transport
 pnpm add @jsontpc/ws ws       # WebSocket transport
 pnpm add @jsontpc/express     # Express middleware adapter
+pnpm add @jsontpc/nestjs      # NestJS dynamic module + decorator adapter
 pnpm add zod                  # optional — schema validation
 ```
 
@@ -233,6 +235,62 @@ const result = await client.add({ a: 10, b: 5 }); // → 15
 
 ---
 
+### NestJS
+
+Decorate services with `@JsonRpcProvider()` and methods with `@JsonRpcHandler()`. `JsonRpcModule` auto-discovers them at startup — no manual provider listing in `forRoot()`.
+
+**`math.service.ts`**
+
+```ts
+import { Injectable } from '@nestjs/common';
+import { JsonRpcHandler, JsonRpcProvider } from '@jsontpc/nestjs';
+import { z } from 'zod';
+
+@Injectable()
+@JsonRpcProvider()
+export class MathService {
+  @JsonRpcHandler('add', {
+    input: z.object({ a: z.number(), b: z.number() }),
+    output: z.number(),
+  })
+  add(input: { a: number; b: number }): number {
+    return input.a + input.b;
+  }
+}
+```
+
+**`app.module.ts`**
+
+```ts
+import { Module } from '@nestjs/common';
+import { JsonRpcModule } from '@jsontpc/nestjs';
+import { MathService } from './math.service';
+
+@Module({
+  imports: [
+    JsonRpcModule.forRoot({ path: '/rpc' }),
+  ],
+  providers: [MathService],
+})
+export class AppModule {}
+```
+
+**Client** — use `HttpClientTransport` from `@jsontpc/http`
+
+```ts
+import { createClient } from '@jsontpc/core';
+import { HttpClientTransport } from '@jsontpc/http';
+
+const client = createClient<typeof router>(
+  new HttpClientTransport('http://localhost:3000/rpc'),
+);
+const result = await client.add({ a: 10, b: 5 }); // → 15
+```
+
+Remember to `import 'reflect-metadata'` at your `main.ts` entry point.
+
+---
+
 ### Custom Adapters
 
 `@jsontpc/core` exports two integration paths for building adapters for **any** HTTP framework:
@@ -343,6 +401,10 @@ pnpm --filter jsontpc-examples ws:client           # Run typed proxy demo agains
 # Express examples (run server in one terminal, client in another)
 pnpm --filter jsontpc-examples express:server      # Start Express JSON-RPC server on port 3300
 pnpm --filter jsontpc-examples express:client      # Run typed proxy demo against port 3300
+
+# NestJS examples (run server in one terminal, client in another)
+pnpm --filter jsontpc-examples nestjs:server       # Start NestJS JSON-RPC server on port 3500
+pnpm --filter jsontpc-examples nestjs:client       # Run typed proxy demo against port 3500
 ```
 
 See [`examples/`](examples/) for the full list.
