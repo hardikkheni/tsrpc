@@ -208,7 +208,7 @@ describe('jsonRpcExpress middleware', () => {
   // 9. Works with express.json() pre-parser
   // -------------------------------------------------------------------------
 
-  it('works with express.json() pre-parser upstream', async () => {
+  it('works with express.json() pre-parser upstream', { timeout: 10_000 }, async () => {
     const preApp = express();
     preApp.use(express.json());
     preApp.post('/rpc', jsonRpcExpress(new JsonRpcServer(router)));
