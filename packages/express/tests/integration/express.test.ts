@@ -4,7 +4,7 @@ import type { AnyBatch, AnyResponse, JsonRpcResponse2Err, JsonRpcResponse2Ok } f
 import { HttpClientTransport } from '@jsontpc/http';
 import express from 'express';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { jsonRpcExpress } from '../../src/index.js';
+import { jsonRpcExpress } from '../../src';
 
 // ---------------------------------------------------------------------------
 // Shared router
