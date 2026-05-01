@@ -1,5 +1,11 @@
 # @jsontpc/ws
 
+## 0.1.0
+
+### Minor Changes
+
+- b047bfa: ws transport implemented
+
 ## 0.0.3
 
 ### Patch Changes
